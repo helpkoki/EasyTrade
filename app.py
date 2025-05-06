@@ -1,11 +1,11 @@
+import os
+import requests
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, decode_predictions
-import numpy as np
-import os
-import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -13,8 +13,13 @@ CORS(app)
 # Load pre-trained MobileNetV2 model
 model = MobileNetV2(weights="imagenet", include_top=True)
 
-# eBay API configuration (you need to replace this with a valid token)
-EBAY_APP_ID = "YOUR_EBAY_APP_ID"
+# Set up file upload directory
+UPLOAD_FOLDER = "uploads"
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# eBay API configuration (use an OAuth token for Authorization)
+EBAY_OAUTH_TOKEN = "YOUR_EBAY_OAUTH_TOKEN"
 EBAY_API_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 
 @app.route("/")
@@ -27,7 +32,7 @@ def predict_price():
         return jsonify({"error": "No image file provided"}), 400
 
     img_file = request.files["image"]
-    img_path = os.path.join("uploads", img_file.filename)
+    img_path = os.path.join(UPLOAD_FOLDER, img_file.filename)
     img_file.save(img_path)
 
     try:
@@ -42,9 +47,9 @@ def predict_price():
         decoded_predictions = decode_predictions(predictions, top=1)[0]
         object_class = decoded_predictions[0][1]
 
-        # Prepare eBay API request
+        # Prepare eBay API request with OAuth token
         headers = {
-            "Authorization": f"Bearer {EBAY_APP_ID}",
+            "Authorization": f"Bearer {EBAY_OAUTH_TOKEN}",
             "Content-Type": "application/json",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
         }
@@ -54,6 +59,7 @@ def predict_price():
             "limit": 5
         }
 
+        # Request data from eBay API
         response = requests.get(EBAY_API_URL, headers=headers, params=params)
 
         if response.status_code == 200:
@@ -68,6 +74,7 @@ def predict_price():
 
             avg_price = sum(prices) / len(prices) if prices else 0
 
+            # Remove the image after processing
             os.remove(img_path)
 
             return jsonify({
@@ -83,8 +90,8 @@ def predict_price():
             })
 
     except Exception as e:
+        os.remove(img_path)  # Ensure file is removed in case of error
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    os.makedirs("uploads", exist_ok=True)
     app.run(debug=True, port=5000)
