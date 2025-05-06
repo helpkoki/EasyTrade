@@ -6,6 +6,8 @@ from flask_cors import CORS
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, decode_predictions
+from PIL import Image
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app)
@@ -32,12 +34,13 @@ def predict_price():
         return jsonify({"error": "No image file provided"}), 400
 
     img_file = request.files["image"]
-    img_path = os.path.join(UPLOAD_FOLDER, img_file.filename)
-    img_file.save(img_path)
 
     try:
-        # Load and preprocess the image
-        img = image.load_img(img_path, target_size=(224, 224))
+        # Read image from memory
+        img = Image.open(BytesIO(img_file.read()))
+        img = img.convert("RGB")
+        img = img.resize((224, 224))
+
         x = image.img_to_array(img)
         x = np.expand_dims(x, axis=0)
         x = preprocess_input(x)
@@ -47,7 +50,7 @@ def predict_price():
         decoded_predictions = decode_predictions(predictions, top=1)[0]
         object_class = decoded_predictions[0][1]
 
-        # Prepare eBay API request with OAuth token
+        # Prepare eBay API request
         headers = {
             "Authorization": f"Bearer {EBAY_OAUTH_TOKEN}",
             "Content-Type": "application/json",
@@ -59,7 +62,6 @@ def predict_price():
             "limit": 5
         }
 
-        # Request data from eBay API
         response = requests.get(EBAY_API_URL, headers=headers, params=params)
 
         if response.status_code == 200:
@@ -74,9 +76,6 @@ def predict_price():
 
             avg_price = sum(prices) / len(prices) if prices else 0
 
-            # Remove the image after processing
-            os.remove(img_path)
-
             return jsonify({
                 "detected_object": object_class,
                 "predicted_average_price": f"${avg_price:.2f}",
@@ -90,7 +89,6 @@ def predict_price():
             })
 
     except Exception as e:
-        os.remove(img_path)  # Ensure file is removed in case of error
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
